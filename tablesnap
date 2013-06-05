@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import pyinotify
 import boto
 
 import argparse
@@ -56,8 +55,8 @@ default_chunk_size = 256
 default_listen_event = 'IN_MOVED_TO'
 
 
-class UploadHandler(pyinotify.ProcessEvent):
-    def my_init(self, threads=None, key=None, secret=None, bucket_name=None,
+class UploadHandler():
+    def __init__(self, threads=None, key=None, secret=None, bucket_name=None,
                 prefix=None, name=None, max_size=None, chunk_size=None,
                 include=None,
                 with_index=True,
@@ -95,6 +94,7 @@ class UploadHandler(pyinotify.ProcessEvent):
                              pathname)
 
     def add_file(self, filename):
+        default_log.info('Adding File %s' %(filename))
         if self.include is None or (self.include is not None
                                     and self.include(filename)):
             self.fileq.put(filename)
@@ -109,9 +109,11 @@ class UploadHandler(pyinotify.ProcessEvent):
     def worker(self):
         bucket = self.get_bucket()
 
+        default_log.info('Worker Started')
         while True:
             f = self.fileq.get()
             keyname = self.build_keyname(f)
+            default_log.info('File %s' %(f))
             try:
                 self.upload_sstable(bucket, keyname, f)
             except:
@@ -122,11 +124,6 @@ class UploadHandler(pyinotify.ProcessEvent):
 
             self.fileq.task_done()
 
-    def process_IN_CLOSE_WRITE(self, event):
-        self.add_file(event.pathname)
-
-    def process_IN_MOVED_TO(self, event):
-        self.add_file(event.pathname)
 
     #
     # Check if this keyname (ie, file) has already been uploaded to
@@ -250,6 +247,7 @@ class UploadHandler(pyinotify.ProcessEvent):
         try:
             stat = os.stat(filename)
         except OSError:
+            self.log.info('Error in File : %s' % (filename))
             # File removed?
             return
 
@@ -473,22 +471,10 @@ def main():
                             max_size=int(args.max_upload_size),
                             chunk_size=int(args.multipart_chunk_size))
 
-    wm = pyinotify.WatchManager()
-    notifier = pyinotify.Notifier(wm, handler)
-
-    mask = get_mask(args.listen_events)
-    for path in args.paths:
-        ret = wm.add_watch(path, mask, rec=args.recursive,
-                           auto_add=args.auto_add)
-        if ret[path] == -1:
-            default_log.critical('add_watch failed for %s, bailing out!' %
-                                (path))
-            return 1
-
     if args.backup:
         backup_files(handler, args.paths, args.recursive, include)
 
-    notifier.loop()
+    handler.worker()
 
 if __name__ == '__main__':
     sys.exit(main())
